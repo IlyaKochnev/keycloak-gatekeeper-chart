@@ -28,6 +28,9 @@ spec:
         prometheus.io/path: "/oauth/metrics"
         prometheus.io/port: "3000"
       {{- end }}
+      {{- if index .Values.awsSigning "role" }}
+        iam.amazonaws.com/role: {{ .Values.awsSigning.role }}
+      {{- end}}
 {{- with .Values.podAnnotations }}
 {{ toYaml . | indent 8 }}
 {{- end }}
@@ -42,12 +45,16 @@ spec:
             - --discovery-url={{ .Values.discoveryURL }}
             - --client-id=$(CLIENT_ID)
             - --client-secret=$(CLIENT_SECRET)
-            - --upstream-url={{ .Values.upstreamURL }}
             - --skip-upstream-tls-verify={{ .Values.skipUpstreamTlsVerify }}
             - --enable-default-deny={{ .Values.defaultDeny }}
             - --enable-logging={{ .Values.logging }}
             - --enable-refresh-tokens={{ .Values.refreshTokens }}
             - --enable-session-cookies={{ .Values.sessionCookies }}
+            {{- if (index .Values.awsSigning "enabled") }}
+            - --upstream-url=http://localhost:9200
+            {{- else }}
+            - --upstream-url={{ .Values.upstreamURL }}
+            {{- end }}
             {{- if not .Values.ingress.tls }}
             - --secure-cookie=false
             {{- end }}
@@ -109,6 +116,26 @@ spec:
             runAsGroup: 1000
           resources:
 {{ toYaml .Values.resources | indent 12 }}
+        {{- if (index .Values.awsSigning "enabled") }}
+        - name: signing-proxy
+          image: mozilla/aws-signing-proxy:1.0.3
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SIGNING_PROXY_DESTINATION
+              value: {{ .Values.upstreamURL }}
+            - name: SIGNING_PROXY_LISTEN
+              value: "localhost:9200"
+            - name: SIGNING_PROXY_REGION
+              value: {{ required "Must state AWS Region to sign for" (index .Values.awsSigning "region") }}
+            - name: SIGNING_PROXY_SERVICE
+              value: {{ .Values.awsSigning.service }}
+            - name: SIGNING_PROXY_STATSD_NAMESPACE
+              value: {{ include "keycloak-gatekeeper.name" . }}-signing
+          resources:
+            requests:
+              cpu: 5m
+              memory: 10Mi
+        {{- end }}
     {{- with .Values.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}
